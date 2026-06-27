@@ -1,13 +1,28 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { after, before, test } from 'node:test';
-import { SegiClient, buildPath, extractToken, parseDurationMs, parseTokenValue } from '../src/segi.js';
+import {
+  SegiClient,
+  buildCookieHeader,
+  buildPath,
+  extractToken,
+  parseDurationMs,
+  parseTokenValue
+} from '../src/segi.js';
 
 test('extracts common Segi token shapes', () => {
   assert.equal(extractToken({ accessToken: 'abc' }), 'abc');
   assert.equal(extractToken({ state: { accessToken: 'nested' } }), 'nested');
   assert.equal(parseTokenValue('Bearer token-value'), 'token-value');
   assert.equal(parseTokenValue('{"accessToken":"json-token"}'), 'json-token');
+  assert.equal(
+    extractToken({
+      storageState: {
+        origins: [{ origin: 'https://segi.extn.ai', localStorage: [{ name: 'segi.tokens', value: '{"accessToken":"storage-token"}' }] }]
+      }
+    }),
+    'storage-token'
+  );
 });
 
 test('builds paths with encoded query values', () => {
@@ -20,6 +35,21 @@ test('parses duration shortcuts', () => {
   assert.equal(parseDurationMs('1d'), 24 * 60 * 60 * 1000);
 });
 
+test('builds API cookie header from storage state', () => {
+  assert.equal(
+    buildCookieHeader(
+      {
+        cookies: [
+          { name: 'session', value: 'abc', domain: '.extn.ai', path: '/', expires: -1 },
+          { name: 'other', value: 'skip', domain: 'example.com', path: '/', expires: -1 }
+        ]
+      },
+      'https://segiapi.extn.ai'
+    ),
+    'session=abc'
+  );
+});
+
 let server;
 let baseUrl;
 let lastRequest;
@@ -28,7 +58,8 @@ before(async () => {
   server = createServer((request, response) => {
     lastRequest = {
       url: request.url,
-      authorization: request.headers.authorization
+      authorization: request.headers.authorization,
+      cookie: request.headers.cookie
     };
     response.setHeader('content-type', 'application/json');
     if (request.url === '/api/auth/refresh') {
@@ -61,4 +92,19 @@ test('client refreshes before request when only refresh token exists', async () 
 
   assert.equal(lastRequest.authorization, 'Bearer refreshed-token');
   assert.equal(lastRequest.url, '/api/projects');
+});
+
+test('client can send saved session cookies without bearer token', async () => {
+  const client = new SegiClient({
+    session: {
+      storageState: {
+        cookies: [{ name: 'session', value: 'cookie-token', domain: '127.0.0.1', path: '/', expires: -1 }]
+      }
+    },
+    baseUrl
+  });
+  await client.getProjects();
+
+  assert.equal(lastRequest.authorization, undefined);
+  assert.equal(lastRequest.cookie, 'session=cookie-token');
 });

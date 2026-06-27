@@ -1,10 +1,10 @@
 {
-  "name": "@bareecorporation/segi-fetch-cli",
-  "version": "0.1.0",
-  "description": "Browserless CLI for reading Segi projects, issues, events, and recordings.",
+  "name": "@bareecorporation/segi-cli",
+  "version": "0.1.1",
+  "description": "Segi CLI for browser SSO login and REST API access.",
   "type": "module",
   "bin": {
-    "segi-fetch": "./src/cli.js"
+    "segi": "./src/cli.js"
   },
   "files": [
     "src",
@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/cli.js && node --check src/segi.js && node --check src/auth-store.js"
+    "check": "node --check src/cli.js && node --check src/segi.js && node --check src/auth-store.js && node --check src/browser-login.js"
   },
   "keywords": [
     "segi",
@@ -29,13 +29,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bareecorporation/segi-fetch-cli.git"
+    "url": "git+https://github.com/bareecorporation/segi-cli.git"
   },
   "bugs": {
-    "url": "https://github.com/bareecorporation/segi-fetch-cli/issues"
+    "url": "https://github.com/bareecorporation/segi-cli/issues"
   },
-  "homepage": "https://github.com/bareecorporation/segi-fetch-cli#readme",
+  "homepage": "https://github.com/bareecorporation/segi-cli#readme",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
+  },
+  "dependencies": {
+    "playwright": "^1.61.1"
   }
 }

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import process from 'node:process';
-import { defaultAuthPath, readTokens, removeTokens, writeTokens } from './auth-store.js';
+import { defaultAuthPath, readSession, removeSession, writeSession } from './auth-store.js';
+import { loginWithBrowser } from './browser-login.js';
 import {
   SegiApiError,
   SegiClient,
@@ -12,37 +13,43 @@ import {
   parseTokenValue
 } from './segi.js';
 
-const HELP = `segi-fetch
+const HELP = `segi
 
-Browserless CLI for reading Segi API data.
+CLI for logging in to Segi with a browser SSO session, then reading Segi REST API data.
 
 Usage:
-  segi-fetch projects [options]
-  segi-fetch project --project <id> [options]
-  segi-fetch issues --project <id> [--status UNRESOLVED] [--limit 20] [options]
-  segi-fetch issue --project <id> --issue <id> [--events] [options]
-  segi-fetch events --project <id> [--limit 20] [options]
-  segi-fetch event --project <id> --event <id> [options]
-  segi-fetch recordings --project <id> [--limit 20] [options]
-  segi-fetch recording --project <id> --recording <id> [options]
-  segi-fetch triage --projects 19,20,21 [--since 60m] [--status UNRESOLVED] [options]
-  segi-fetch login-google --credential <googleIdToken> [options]
-  segi-fetch login-password --email <email> --password <password> [options]
-  segi-fetch refresh [options]
-  segi-fetch whoami [options]
-  segi-fetch logout [options]
+  segi login [options]
+  segi projects [options]
+  segi project --project <id> [options]
+  segi issues --project <id> [--status UNRESOLVED] [--limit 20] [options]
+  segi issue --project <id> --issue <id> [--events] [options]
+  segi events --project <id> [--limit 20] [options]
+  segi event --project <id> --event <id> [options]
+  segi recordings --project <id> [--limit 20] [options]
+  segi recording --project <id> --recording <id> [options]
+  segi triage --projects 19,20,21 [--since 60m] [--status UNRESOLVED] [options]
+  segi login-google --credential <googleIdToken> [options]
+  segi login-password --email <email> --password <password> [options]
+  segi refresh [options]
+  segi whoami [options]
+  segi logout [options]
 
 Auth:
-  SEGI_TOKEN=<accessToken> segi-fetch projects
-  segi-fetch --token <accessToken> projects
-  segi-fetch --tokens-json ./segi.tokens.json projects
+  segi login
+  SEGI_TOKEN=<accessToken> segi projects
+  segi --token <accessToken> projects
+  segi --tokens-json ./segi.tokens.json projects
 
 Options:
   --base-url <url>        Segi API base URL. Default: https://segiapi.extn.ai
+  --app-url <url>         Segi web app URL for browser login. Default: https://segi.extn.ai/projects
   --token <token>         Bearer token or JSON containing accessToken.
   --tokens-json <path>    File containing localStorage segi.tokens JSON.
-  --auth-file <path>      Cached Segi token file. Default: ${defaultAuthPath()}
-  --no-auth-file          Ignore cached tokens.
+  --session-file <path>   Cached Segi browser session file. Default: ${defaultAuthPath()}
+  --auth-file <path>      Alias for --session-file.
+  --no-session-file       Ignore cached browser session.
+  --headless              Run browser login headless.
+  --timeout <duration>    Browser login timeout. Default: 5m.
   --show-tokens           Print full tokens after login or refresh.
   --format <json|summary> Output format. Default: json
   --query key=value       Extra query parameter. Repeatable.
@@ -61,19 +68,31 @@ async function main(argv = process.argv.slice(2)) {
     return;
   }
 
+  const sessionFile = options.sessionFile || options.authFile || defaultAuthPath();
   const token = resolveToken(options);
-  const cachedTokens = resolveCachedTokens(options);
+  const cachedSession = resolveCachedSession(options, sessionFile);
   const client = new SegiClient({
-    token: token || extractToken(cachedTokens),
-    refreshToken: options.refreshToken || cachedTokens?.refreshToken || cachedTokens?.refresh_token,
+    token: token || extractToken(cachedSession),
+    refreshToken: options.refreshToken || cachedSession?.refreshToken || cachedSession?.refresh_token,
+    session: cachedSession,
     baseUrl: options.baseUrl,
-    onTokens: (tokens) => writeTokens(tokens, options.authFile || defaultAuthPath())
+    onTokens: (tokens) => writeSession(tokens, sessionFile)
   });
   const query = buildQuery(options);
 
   let payload;
 
   switch (command) {
+    case 'login':
+      payload = await loginWithBrowser({
+        appUrl: options.appUrl,
+        headless: Boolean(options.headless),
+        timeoutMs: parseDurationMs(options.timeout || '5m'),
+        browserName: options.browser
+      });
+      writeSession(payload, sessionFile);
+      payload = redactSession(payload, options.showTokens, sessionFile);
+      break;
     case 'projects':
       payload = await client.getProjects();
       break;
@@ -123,24 +142,24 @@ async function main(argv = process.argv.slice(2)) {
     case 'login-google':
       requireOption(options, 'credential');
       payload = await client.loginWithGoogleCredential(options.credential);
-      payload = redactTokens(payload, options.showTokens, options.authFile);
+      payload = redactTokens(payload, options.showTokens, sessionFile);
       break;
     case 'login-password':
       requireOption(options, 'email');
       requireOption(options, 'password');
       payload = await client.loginWithPassword(options.email, options.password);
-      payload = redactTokens(payload, options.showTokens, options.authFile);
+      payload = redactTokens(payload, options.showTokens, sessionFile);
       break;
     case 'refresh':
       payload = await client.refresh();
-      payload = redactTokens(payload, options.showTokens, options.authFile);
+      payload = redactTokens(payload, options.showTokens, sessionFile);
       break;
     case 'whoami':
       payload = await client.getMe();
       break;
     case 'logout':
-      removeTokens(options.authFile || defaultAuthPath());
-      payload = { ok: true, authFile: options.authFile || defaultAuthPath() };
+      removeSession(sessionFile);
+      payload = { ok: true, sessionFile };
       break;
     default:
       throw new Error(`Unknown command: ${command}`);
@@ -166,7 +185,7 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (['--events', '--no-auth-file', '--show-tokens'].includes(arg)) {
+    if (['--events', '--no-auth-file', '--no-session-file', '--show-tokens', '--headless'].includes(arg)) {
       options[toCamel(arg.slice(2))] = true;
       continue;
     }
@@ -208,9 +227,9 @@ function resolveToken(options) {
   return '';
 }
 
-function resolveCachedTokens(options) {
-  if (options.noAuthFile) return null;
-  return readTokens(options.authFile || defaultAuthPath());
+function resolveCachedSession(options, sessionFile) {
+  if (options.noAuthFile || options.noSessionFile) return null;
+  return readSession(sessionFile);
 }
 
 function buildQuery(options) {
@@ -284,7 +303,21 @@ function redactTokens(tokens, showTokens, authFile) {
     accessToken: tokens?.accessToken ? redact(tokens.accessToken) : undefined,
     refreshToken: tokens?.refreshToken ? redact(tokens.refreshToken) : undefined,
     needsOnboarding: tokens?.needsOnboarding,
-    authFile: authFile || defaultAuthPath()
+    sessionFile: authFile || defaultAuthPath()
+  };
+}
+
+function redactSession(session, showTokens, sessionFile) {
+  if (showTokens) return session;
+  return {
+    ok: true,
+    capturedAt: session.capturedAt,
+    appOrigin: session.appOrigin,
+    currentUrl: session.pageStorage?.url,
+    cookieCount: session.cookieCount,
+    accessToken: session.accessToken ? redact(session.accessToken) : undefined,
+    refreshToken: session.refreshToken ? redact(session.refreshToken) : undefined,
+    sessionFile
   };
 }
 

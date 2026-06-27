@@ -43,10 +43,66 @@ export function extractToken(value) {
     value.access_token ||
     value.token ||
     value.jwt ||
+    value?.tokens?.accessToken ||
+    value?.tokens?.access_token ||
+    value?.tokens?.token ||
+    value?.tokens?.jwt ||
+    value?.session?.accessToken ||
+    value?.session?.access_token ||
     value?.state?.accessToken ||
     value?.state?.access_token ||
+    extractTokenFromStorageState(value.storageState) ||
     ''
   );
+}
+
+export function extractTokenFromStorageState(storageState) {
+  for (const origin of storageState?.origins || []) {
+    for (const item of origin.localStorage || []) {
+      const token = extractTokenFromStorageValue(item.value);
+      if (token) return token;
+    }
+  }
+  return '';
+}
+
+export function extractTokenFromStorageValue(value) {
+  if (!value || typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('Bearer ')) return parseTokenValue(trimmed);
+  if (looksLikeJwt(trimmed)) return trimmed;
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return '';
+
+  try {
+    return extractToken(JSON.parse(trimmed));
+  } catch {
+    return '';
+  }
+}
+
+function looksLikeJwt(value) {
+  return /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value);
+}
+
+export function buildCookieHeader(storageState, requestUrl = DEFAULT_BASE_URL) {
+  const cookies = storageState?.cookies || storageState?.session?.cookies || storageState?.cookies;
+  if (!Array.isArray(cookies) || cookies.length === 0) return '';
+
+  const url = new URL(requestUrl);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  return cookies
+    .filter((cookie) => cookie?.name && cookie.value !== undefined)
+    .filter((cookie) => !cookie.expires || cookie.expires < 0 || cookie.expires > nowSeconds)
+    .filter((cookie) => cookieMatchesHost(cookie, url.hostname))
+    .map((cookie) => `${cookie.name}=${cookie.value}`)
+    .join('; ');
+}
+
+function cookieMatchesHost(cookie, hostname) {
+  const domain = String(cookie.domain || '').replace(/^\./, '');
+  if (!domain) return true;
+  return hostname === domain || hostname.endsWith(`.${domain}`);
 }
 
 export function buildPath(path, query = {}) {
@@ -61,10 +117,19 @@ export function buildPath(path, query = {}) {
 }
 
 export class SegiClient {
-  constructor({ token, refreshToken, baseUrl = DEFAULT_BASE_URL, fetchImpl = globalThis.fetch, onTokens } = {}) {
-    this.token = parseTokenValue(token);
-    this.refreshToken = parseTokenValue(refreshToken);
+  constructor({ token, refreshToken, session, baseUrl = DEFAULT_BASE_URL, fetchImpl = globalThis.fetch, onTokens } = {}) {
+    this.session = session || null;
+    this.token = parseTokenValue(token || extractToken(session));
+    this.refreshToken = parseTokenValue(
+      refreshToken ||
+        session?.refreshToken ||
+        session?.refresh_token ||
+        session?.tokens?.refreshToken ||
+        session?.tokens?.refresh_token ||
+        ''
+    );
     this.baseUrl = normalizeBaseUrl(baseUrl);
+    this.cookieHeader = buildCookieHeader(session?.storageState || session, this.baseUrl);
     this.fetchImpl = fetchImpl;
     this.onTokens = onTokens;
 
@@ -78,19 +143,15 @@ export class SegiClient {
       await this.refresh();
     }
 
-    if (!this.token) {
-      throw new SegiApiError('Missing Segi access token. Set SEGI_TOKEN or pass --token.');
+    if (!this.token && !this.cookieHeader) {
+      throw new SegiApiError('Missing Segi session. Run `segi login`, set SEGI_TOKEN, or pass --token.');
     }
 
     const requestPath = buildPath(path, query);
     const url = `${this.baseUrl}${requestPath}`;
     let response = await this.fetchImpl(url, {
       method,
-      headers: {
-        accept: 'application/json',
-        authorization: `Bearer ${this.token}`,
-        ...(body ? { 'content-type': 'application/json' } : {})
-      },
+      headers: this.requestHeaders(body),
       body: body ? JSON.stringify(body) : undefined
     });
 
@@ -98,11 +159,7 @@ export class SegiClient {
       await this.refresh();
       response = await this.fetchImpl(url, {
         method,
-        headers: {
-          accept: 'application/json',
-          authorization: `Bearer ${this.token}`,
-          ...(body ? { 'content-type': 'application/json' } : {})
-        },
+        headers: this.requestHeaders(body),
         body: body ? JSON.stringify(body) : undefined
       });
     }
@@ -189,10 +246,21 @@ export class SegiClient {
     this.token = parseTokenValue(tokens?.accessToken || tokens?.access_token || tokens?.token || '');
     this.refreshToken = parseTokenValue(tokens?.refreshToken || tokens?.refresh_token || this.refreshToken || '');
     this.onTokens?.({
+      ...(this.session || {}),
+      tokens,
       ...tokens,
       accessToken: this.token,
       refreshToken: this.refreshToken
     });
+  }
+
+  requestHeaders(body) {
+    return {
+      accept: 'application/json',
+      ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+      ...(this.cookieHeader ? { cookie: this.cookieHeader } : {}),
+      ...(body ? { 'content-type': 'application/json' } : {})
+    };
   }
 
   getMe() {

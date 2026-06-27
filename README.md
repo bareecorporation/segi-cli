@@ -1,102 +1,94 @@
-# segi-fetch-cli
+# segi-cli
 
-Browserless CLI for reading Segi projects, issues, events, and recordings from `https://segiapi.extn.ai`.
+CLI for logging in to Segi through the real browser SSO flow, saving that
+session, and then reading Segi REST API data from `https://segiapi.extn.ai`.
 
-It is meant for agents and automations that should not depend on an authenticated Chrome session.
+This is meant for agents and automations that should not depend on an already
+authenticated Chrome profile.
 
 ## Install
 
-Configure GitHub Packages auth first. A classic token or fine-grained token with
-package read access is enough for install; publish needs package write access.
-
 ```bash
 npm config set @bareecorporation:registry https://npm.pkg.github.com
-npm config set //npm.pkg.github.com/:_authToken "$GITHUB_TOKEN"
-```
-
-```bash
-npm install -g @bareecorporation/segi-fetch-cli --registry=https://npm.pkg.github.com
+npm install -g @bareecorporation/segi-cli
 ```
 
 Or run without installing:
 
 ```bash
-npx --yes --package @bareecorporation/segi-fetch-cli --registry=https://npm.pkg.github.com segi-fetch projects
+npx --yes --package @bareecorporation/segi-cli --@bareecorporation:registry=https://npm.pkg.github.com segi projects
 ```
 
-## Auth
-
-The CLI uses the same bearer token that the Segi web app sends to `segiapi.extn.ai`.
+If Playwright has no browser installed yet:
 
 ```bash
-export SEGI_TOKEN='<accessToken>'
-segi-fetch projects
+npx playwright install chromium
 ```
 
-It also accepts a JSON file shaped like the browser `localStorage` value for `segi.tokens`:
+## Login
+
+Run the browser SSO flow once:
 
 ```bash
-segi-fetch --tokens-json ./segi.tokens.json projects
+segi login
 ```
 
-For SSO-heavy environments, cache Segi tokens once and let the CLI refresh them without opening Chrome:
+The CLI opens `https://segi.extn.ai/projects`. Complete Google SSO in that
+browser window. After a Segi session is detected, the CLI saves cookies,
+localStorage, sessionStorage, and any extracted Segi tokens to:
 
 ```bash
-segi-fetch login-google --credential '<google-id-token>'
-segi-fetch whoami
-segi-fetch triage --projects 19,20,21 --since 60m --format summary
+~/.config/segi-cli/session.json
 ```
 
-The cached auth file is stored at:
+Later REST calls reuse that saved session:
 
 ```bash
-~/.config/segi-fetch-cli/tokens.json
+segi whoami
+segi triage --projects 19,20,21 --since 60m --format summary
 ```
 
-The Segi web app uses Google Identity Services and posts the resulting ID token to
-`POST https://segiapi.extn.ai/api/auth/google`. `login-google` does the same exchange,
-then stores the Segi `accessToken` and `refreshToken`. Later CLI calls refresh via
-`POST /api/auth/refresh` automatically.
-
-Password auth is also available for non-SSO accounts:
+You can override the session file:
 
 ```bash
-segi-fetch login-password --email you@example.com --password '...'
+segi --session-file ./segi.session.json projects
 ```
 
-Supported token fields:
+Token-only auth is still supported for non-interactive use:
 
-- `accessToken`
-- `access_token`
-- `token`
-- `jwt`
-- nested `state.accessToken`
+```bash
+SEGI_TOKEN='<accessToken>' segi projects
+segi --token '<accessToken>' projects
+segi --tokens-json ./segi.tokens.json projects
+```
 
 ## Commands
 
 ```bash
-segi-fetch projects
-segi-fetch project --project 19
-segi-fetch issues --project 19 --status UNRESOLVED --limit 20
-segi-fetch issue --project 19 --issue 966 --events --events-limit 5
-segi-fetch events --project 19 --limit 20
-segi-fetch event --project 19 --event <eventId>
-segi-fetch recordings --project 19 --limit 20
-segi-fetch recording --project 19 --recording <recordingId>
+segi login
+segi projects
+segi project --project 19
+segi issues --project 19 --status UNRESOLVED --limit 20
+segi issue --project 19 --issue 966 --events --events-limit 5
+segi events --project 19 --limit 20
+segi event --project 19 --event <eventId>
+segi recordings --project 19 --limit 20
+segi recording --project 19 --recording <recordingId>
 ```
 
 Extra API query parameters can be passed repeatedly:
 
 ```bash
-segi-fetch issues --project 19 --query status=UNRESOLVED --query release=abc123
+segi issues --project 19 --query status=UNRESOLVED --query release=abc123
 ```
 
 ## Agent Triage
 
-For recurring Orca automation, use `triage` to inspect multiple projects in one call:
+For recurring Orca automation, use `triage` to inspect multiple projects in one
+call:
 
 ```bash
-segi-fetch triage --projects 19,20,21 --since 60m --status UNRESOLVED --limit 20 --format summary
+segi triage --projects 19,20,21 --since 60m --status UNRESOLVED --limit 20 --format summary
 ```
 
 Project IDs used by Baree automation:
@@ -105,12 +97,13 @@ Project IDs used by Baree automation:
 - `20`: `reitwagen-hono`
 - `21`: `reitwagen-partners`
 
-Exit code `10` means Segi returned `401 Unauthorized`, usually because `SEGI_TOKEN` is missing or expired.
+Exit code `10` means Segi returned `401 Unauthorized`. Run `segi login` again to
+refresh the browser SSO session.
 
-`logout` removes the cached token file:
+`logout` removes the cached session file:
 
 ```bash
-segi-fetch logout
+segi logout
 ```
 
 ## Development
