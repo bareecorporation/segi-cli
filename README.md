@@ -7,13 +7,13 @@ It is meant for agents and automations that should not depend on an authenticate
 ## Install
 
 ```bash
-npm install -g segi-fetch-cli
+npm install -g @bareecorporation/segi-fetch-cli --registry=https://npm.pkg.github.com
 ```
 
 Or run without installing:
 
 ```bash
-npx -y segi-fetch-cli projects
+npx --yes --package @bareecorporation/segi-fetch-cli --registry=https://npm.pkg.github.com segi-fetch projects
 ```
 
 ## Auth
