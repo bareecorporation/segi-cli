@@ -31,6 +31,10 @@ before(async () => {
       authorization: request.headers.authorization
     };
     response.setHeader('content-type', 'application/json');
+    if (request.url === '/api/auth/refresh') {
+      response.end(JSON.stringify({ accessToken: 'refreshed-token', refreshToken: 'refresh-token' }));
+      return;
+    }
     response.end(JSON.stringify({ ok: true, items: [] }));
   });
 
@@ -49,4 +53,12 @@ test('client sends bearer auth and Segi issue URL', async () => {
 
   assert.equal(lastRequest.authorization, 'Bearer test-token');
   assert.equal(lastRequest.url, '/api/projects/19/issues?status=UNRESOLVED&limit=5');
+});
+
+test('client refreshes before request when only refresh token exists', async () => {
+  const client = new SegiClient({ refreshToken: 'refresh-token', baseUrl });
+  await client.getProjects();
+
+  assert.equal(lastRequest.authorization, 'Bearer refreshed-token');
+  assert.equal(lastRequest.url, '/api/projects');
 });

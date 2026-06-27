@@ -61,10 +61,12 @@ export function buildPath(path, query = {}) {
 }
 
 export class SegiClient {
-  constructor({ token, baseUrl = DEFAULT_BASE_URL, fetchImpl = globalThis.fetch } = {}) {
+  constructor({ token, refreshToken, baseUrl = DEFAULT_BASE_URL, fetchImpl = globalThis.fetch, onTokens } = {}) {
     this.token = parseTokenValue(token);
+    this.refreshToken = parseTokenValue(refreshToken);
     this.baseUrl = normalizeBaseUrl(baseUrl);
     this.fetchImpl = fetchImpl;
+    this.onTokens = onTokens;
 
     if (typeof this.fetchImpl !== 'function') {
       throw new TypeError('A fetch implementation is required. Use Node.js 18.18 or newer.');
@@ -72,17 +74,94 @@ export class SegiClient {
   }
 
   async request(path, { query, method = 'GET', body } = {}) {
+    if (!this.token && this.refreshToken) {
+      await this.refresh();
+    }
+
     if (!this.token) {
       throw new SegiApiError('Missing Segi access token. Set SEGI_TOKEN or pass --token.');
     }
 
     const requestPath = buildPath(path, query);
     const url = `${this.baseUrl}${requestPath}`;
-    const response = await this.fetchImpl(url, {
+    let response = await this.fetchImpl(url, {
       method,
       headers: {
         accept: 'application/json',
         authorization: `Bearer ${this.token}`,
+        ...(body ? { 'content-type': 'application/json' } : {})
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
+
+    if (response.status === 401 && this.refreshToken) {
+      await this.refresh();
+      response = await this.fetchImpl(url, {
+        method,
+        headers: {
+          accept: 'application/json',
+          authorization: `Bearer ${this.token}`,
+          ...(body ? { 'content-type': 'application/json' } : {})
+        },
+        body: body ? JSON.stringify(body) : undefined
+      });
+    }
+
+    const text = await response.text();
+    const data = parseJson(text);
+
+    if (!response.ok) {
+      const message =
+        (data && typeof data === 'object' && (data.message || data.error)) ||
+        `${response.status} ${response.statusText}`;
+      throw new SegiApiError(String(message), {
+        status: response.status,
+        statusText: response.statusText,
+        body: data ?? text,
+        url
+      });
+    }
+
+    return data ?? text;
+  }
+
+  async loginWithGoogleCredential(credential) {
+    const tokens = await this.publicRequest('/api/auth/google', {
+      method: 'POST',
+      body: { credential }
+    });
+    this.setTokens(tokens);
+    return tokens;
+  }
+
+  async loginWithPassword(email, password) {
+    const tokens = await this.publicRequest('/api/auth/login', {
+      method: 'POST',
+      body: { email, password }
+    });
+    this.setTokens(tokens);
+    return tokens;
+  }
+
+  async refresh() {
+    if (!this.refreshToken) {
+      throw new SegiApiError('Missing Segi refresh token.');
+    }
+
+    const tokens = await this.publicRequest('/api/auth/refresh', {
+      method: 'POST',
+      body: { refreshToken: this.refreshToken }
+    });
+    this.setTokens(tokens);
+    return tokens;
+  }
+
+  async publicRequest(path, { method = 'GET', body } = {}) {
+    const url = `${this.baseUrl}${buildPath(path)}`;
+    const response = await this.fetchImpl(url, {
+      method,
+      headers: {
+        accept: 'application/json',
         ...(body ? { 'content-type': 'application/json' } : {})
       },
       body: body ? JSON.stringify(body) : undefined
@@ -104,6 +183,20 @@ export class SegiClient {
     }
 
     return data ?? text;
+  }
+
+  setTokens(tokens) {
+    this.token = parseTokenValue(tokens?.accessToken || tokens?.access_token || tokens?.token || '');
+    this.refreshToken = parseTokenValue(tokens?.refreshToken || tokens?.refresh_token || this.refreshToken || '');
+    this.onTokens?.({
+      ...tokens,
+      accessToken: this.token,
+      refreshToken: this.refreshToken
+    });
+  }
+
+  getMe() {
+    return this.request('/api/me');
   }
 
   getProjects() {

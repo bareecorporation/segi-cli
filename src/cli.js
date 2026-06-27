@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import process from 'node:process';
+import { defaultAuthPath, readTokens, removeTokens, writeTokens } from './auth-store.js';
 import {
   SegiApiError,
   SegiClient,
@@ -25,6 +26,11 @@ Usage:
   segi-fetch recordings --project <id> [--limit 20] [options]
   segi-fetch recording --project <id> --recording <id> [options]
   segi-fetch triage --projects 19,20,21 [--since 60m] [--status UNRESOLVED] [options]
+  segi-fetch login-google --credential <googleIdToken> [options]
+  segi-fetch login-password --email <email> --password <password> [options]
+  segi-fetch refresh [options]
+  segi-fetch whoami [options]
+  segi-fetch logout [options]
 
 Auth:
   SEGI_TOKEN=<accessToken> segi-fetch projects
@@ -35,6 +41,9 @@ Options:
   --base-url <url>        Segi API base URL. Default: https://segiapi.extn.ai
   --token <token>         Bearer token or JSON containing accessToken.
   --tokens-json <path>    File containing localStorage segi.tokens JSON.
+  --auth-file <path>      Cached Segi token file. Default: ${defaultAuthPath()}
+  --no-auth-file          Ignore cached tokens.
+  --show-tokens           Print full tokens after login or refresh.
   --format <json|summary> Output format. Default: json
   --query key=value       Extra query parameter. Repeatable.
   --limit <n>             Query limit.
@@ -53,7 +62,13 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   const token = resolveToken(options);
-  const client = new SegiClient({ token, baseUrl: options.baseUrl });
+  const cachedTokens = resolveCachedTokens(options);
+  const client = new SegiClient({
+    token: token || extractToken(cachedTokens),
+    refreshToken: options.refreshToken || cachedTokens?.refreshToken || cachedTokens?.refresh_token,
+    baseUrl: options.baseUrl,
+    onTokens: (tokens) => writeTokens(tokens, options.authFile || defaultAuthPath())
+  });
   const query = buildQuery(options);
 
   let payload;
@@ -105,6 +120,28 @@ async function main(argv = process.argv.slice(2)) {
       requireOption(options, 'projects');
       payload = await runTriage(client, options);
       break;
+    case 'login-google':
+      requireOption(options, 'credential');
+      payload = await client.loginWithGoogleCredential(options.credential);
+      payload = redactTokens(payload, options.showTokens, options.authFile);
+      break;
+    case 'login-password':
+      requireOption(options, 'email');
+      requireOption(options, 'password');
+      payload = await client.loginWithPassword(options.email, options.password);
+      payload = redactTokens(payload, options.showTokens, options.authFile);
+      break;
+    case 'refresh':
+      payload = await client.refresh();
+      payload = redactTokens(payload, options.showTokens, options.authFile);
+      break;
+    case 'whoami':
+      payload = await client.getMe();
+      break;
+    case 'logout':
+      removeTokens(options.authFile || defaultAuthPath());
+      payload = { ok: true, authFile: options.authFile || defaultAuthPath() };
+      break;
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -129,8 +166,8 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (arg === '--events') {
-      options.events = true;
+    if (['--events', '--no-auth-file', '--show-tokens'].includes(arg)) {
+      options[toCamel(arg.slice(2))] = true;
       continue;
     }
 
@@ -169,6 +206,11 @@ function resolveToken(options) {
   }
 
   return '';
+}
+
+function resolveCachedTokens(options) {
+  if (options.noAuthFile) return null;
+  return readTokens(options.authFile || defaultAuthPath());
 }
 
 function buildQuery(options) {
@@ -233,6 +275,24 @@ function summarizeIssue(issue) {
     url: issue.url || issue.pageUrl || issue.requestUrl,
     assignee: issue.assigneeUserId || issue.assignee?.name || issue.assignee?.email
   };
+}
+
+function redactTokens(tokens, showTokens, authFile) {
+  if (showTokens) return tokens;
+  return {
+    ok: true,
+    accessToken: tokens?.accessToken ? redact(tokens.accessToken) : undefined,
+    refreshToken: tokens?.refreshToken ? redact(tokens.refreshToken) : undefined,
+    needsOnboarding: tokens?.needsOnboarding,
+    authFile: authFile || defaultAuthPath()
+  };
+}
+
+function redact(value) {
+  if (!value) return undefined;
+  const text = String(value);
+  if (text.length <= 12) return '***';
+  return `${text.slice(0, 6)}...${text.slice(-4)}`;
 }
 
 function requireOption(options, key) {
