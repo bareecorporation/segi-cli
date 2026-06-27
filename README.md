@@ -6,6 +6,14 @@ It is meant for agents and automations that should not depend on an authenticate
 
 ## Install
 
+Configure GitHub Packages auth first. A classic token or fine-grained token with
+package read access is enough for install; publish needs package write access.
+
+```bash
+npm config set @bareecorporation:registry https://npm.pkg.github.com
+npm config set //npm.pkg.github.com/:_authToken "$GITHUB_TOKEN"
+```
+
 ```bash
 npm install -g @bareecorporation/segi-fetch-cli --registry=https://npm.pkg.github.com
 ```
