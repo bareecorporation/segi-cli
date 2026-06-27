@@ -41,6 +41,16 @@ localStorage, sessionStorage, and any extracted Segi tokens to:
 ~/.config/segi-cli/session.json
 ```
 
+The login browser uses a persistent profile at:
+
+```bash
+~/.config/segi-cli/browser-profile
+```
+
+That profile is separate from your normal Chrome profile, but it is reused by
+later `segi login` runs so Google SSO does not start from a completely clean
+browser each time.
+
 Later REST calls reuse that saved session:
 
 ```bash
@@ -99,6 +109,9 @@ Project IDs used by Baree automation:
 
 Exit code `10` means Segi returned `401 Unauthorized`. Run `segi login` again to
 refresh the browser SSO session.
+
+Do not run `segi login` from unattended automation. Scheduled jobs should report
+that manual login refresh is required, then stop cleanly.
 
 `logout` removes the cached session file:
 

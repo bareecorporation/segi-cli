@@ -48,8 +48,9 @@ Options:
   --session-file <path>   Cached Segi browser session file. Default: ${defaultAuthPath()}
   --auth-file <path>      Alias for --session-file.
   --no-session-file       Ignore cached browser session.
+  --browser-data-dir <p>  Persistent browser profile for login.
   --headless              Run browser login headless.
-  --timeout <duration>    Browser login timeout. Default: 5m.
+  --timeout <duration>    Browser login timeout. Default: 30m.
   --show-tokens           Print full tokens after login or refresh.
   --format <json|summary> Output format. Default: json
   --query key=value       Extra query parameter. Repeatable.
@@ -87,8 +88,9 @@ async function main(argv = process.argv.slice(2)) {
       payload = await loginWithBrowser({
         appUrl: options.appUrl,
         headless: Boolean(options.headless),
-        timeoutMs: parseDurationMs(options.timeout || '5m'),
-        browserName: options.browser
+        timeoutMs: parseDurationMs(options.timeout || '30m'),
+        browserName: options.browser,
+        browserDataDir: options.browserDataDir
       });
       writeSession(payload, sessionFile);
       payload = redactSession(payload, options.showTokens, sessionFile);

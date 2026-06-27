@@ -1,7 +1,9 @@
+import os from 'node:os';
+import path from 'node:path';
 import { buildCookieHeader, extractToken, extractTokenFromStorageValue } from './segi.js';
 
 const DEFAULT_APP_URL = 'https://segi.extn.ai/projects';
-const DEFAULT_LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_LOGIN_TIMEOUT_MS = 30 * 60 * 1000;
 
 export async function loginWithBrowser({
   appUrl = DEFAULT_APP_URL,
@@ -9,15 +11,16 @@ export async function loginWithBrowser({
   timeoutMs = DEFAULT_LOGIN_TIMEOUT_MS,
   pollMs = 1000,
   browserName = 'chromium',
+  browserDataDir = defaultBrowserDataDir(),
   stderr = process.stderr
 } = {}) {
   const playwright = await importPlaywright();
   const browserType = playwright[browserName];
   if (!browserType) throw new Error(`Unsupported browser: ${browserName}`);
 
-  let browser;
+  let context;
   try {
-    browser = await browserType.launch({ headless });
+    context = await browserType.launchPersistentContext(browserDataDir, { headless });
   } catch (error) {
     if (String(error.message || error).includes('Executable')) {
       throw new Error(
@@ -27,11 +30,11 @@ export async function loginWithBrowser({
     throw error;
   }
 
-  const context = await browser.newContext();
-  const page = await context.newPage();
+  const page = context.pages()[0] || (await context.newPage());
 
   try {
     stderr.write(`Opening ${appUrl}\n`);
+    stderr.write(`Using browser profile ${browserDataDir}\n`);
     stderr.write('Complete Segi SSO in the browser window. This CLI will continue after it detects a session.\n');
     await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
 
@@ -50,8 +53,13 @@ export async function loginWithBrowser({
 
     return captured;
   } finally {
-    await browser.close();
+    await context.close();
   }
+}
+
+export function defaultBrowserDataDir() {
+  const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(configHome, 'segi-cli', 'browser-profile');
 }
 
 async function importPlaywright() {
