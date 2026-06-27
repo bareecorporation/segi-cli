@@ -338,10 +338,11 @@ export function isRecent(value, sinceMs, now = Date.now()) {
 
 export function parseDurationMs(value) {
   if (!value) return undefined;
-  const match = String(value).trim().match(/^(\d+)(m|h|d)?$/i);
+  const match = String(value).trim().match(/^(\d+)(s|m|h|d)?$/i);
   if (!match) throw new Error(`Invalid duration: ${value}`);
   const amount = Number(match[1]);
   const unit = (match[2] || 'm').toLowerCase();
+  if (unit === 's') return amount * 1000;
   if (unit === 'm') return amount * 60 * 1000;
   if (unit === 'h') return amount * 60 * 60 * 1000;
   return amount * 24 * 60 * 60 * 1000;

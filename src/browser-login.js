@@ -1,4 +1,4 @@
-import { extractToken, extractTokenFromStorageValue } from './segi.js';
+import { buildCookieHeader, extractToken, extractTokenFromStorageValue } from './segi.js';
 
 const DEFAULT_APP_URL = 'https://segi.extn.ai/projects';
 const DEFAULT_LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
@@ -40,11 +40,11 @@ export async function loginWithBrowser({
 
     while (Date.now() < deadline) {
       captured = await captureSession(context, page, appUrl);
-      if (captured.accessToken || captured.cookieCount > 0) break;
+      if (isAuthenticatedSession(captured)) break;
       await page.waitForTimeout(pollMs);
     }
 
-    if (!captured?.accessToken && !captured?.cookieCount) {
+    if (!isAuthenticatedSession(captured)) {
       throw new Error(`Timed out waiting for Segi login after ${Math.round(timeoutMs / 1000)}s.`);
     }
 
@@ -77,8 +77,27 @@ async function captureSession(context, page, appUrl) {
     tokens,
     accessToken: extractToken(tokens) || extractToken(storageState),
     refreshToken: tokens.refreshToken || tokens.refresh_token || '',
-    cookieCount: storageState.cookies?.length || 0
+    cookieCount: storageState.cookies?.length || 0,
+    apiCookieCount: countCookieHeader(buildCookieHeader(storageState, 'https://segiapi.extn.ai'))
   };
+}
+
+function isAuthenticatedSession(session) {
+  if (!session) return false;
+  if (session.accessToken || session.refreshToken) return true;
+  if (!session.apiCookieCount) return false;
+
+  try {
+    const url = new URL(session.pageStorage?.url || session.appUrl);
+    return !url.pathname.startsWith('/login');
+  } catch {
+    return false;
+  }
+}
+
+function countCookieHeader(cookieHeader) {
+  if (!cookieHeader) return 0;
+  return cookieHeader.split(';').filter((item) => item.trim()).length;
 }
 
 async function readPageStorage(page) {

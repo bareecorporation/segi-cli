@@ -30,6 +30,7 @@ test('builds paths with encoded query values', () => {
 });
 
 test('parses duration shortcuts', () => {
+  assert.equal(parseDurationMs('30s'), 30 * 1000);
   assert.equal(parseDurationMs('30m'), 30 * 60 * 1000);
   assert.equal(parseDurationMs('2h'), 2 * 60 * 60 * 1000);
   assert.equal(parseDurationMs('1d'), 24 * 60 * 60 * 1000);
