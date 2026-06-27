@@ -3,15 +3,17 @@ import path from 'node:path';
 import { buildCookieHeader, extractToken, extractTokenFromStorageValue } from './segi.js';
 
 const DEFAULT_APP_URL = 'https://segi.extn.ai/projects';
+const DEFAULT_LOGIN_URL = 'https://segi.extn.ai/login';
 const DEFAULT_LOGIN_TIMEOUT_MS = 30 * 60 * 1000;
 
 export async function loginWithBrowser({
-  appUrl = DEFAULT_APP_URL,
+  appUrl = DEFAULT_LOGIN_URL,
   headless = false,
   timeoutMs = DEFAULT_LOGIN_TIMEOUT_MS,
   pollMs = 1000,
   browserName = 'chromium',
   browserDataDir = defaultBrowserDataDir(),
+  google = true,
   stderr = process.stderr
 } = {}) {
   const playwright = await importPlaywright();
@@ -37,12 +39,13 @@ export async function loginWithBrowser({
     stderr.write(`Using browser profile ${browserDataDir}\n`);
     stderr.write('Complete Segi SSO in the browser window. This CLI will continue after it detects a session.\n');
     await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
+    if (google) await clickGoogleSignIn(page, stderr);
 
     const deadline = Date.now() + timeoutMs;
     let captured = null;
 
     while (Date.now() < deadline) {
-      captured = await captureSession(context, page, appUrl);
+      captured = await captureSession(context, appUrl);
       if (isAuthenticatedSession(captured)) break;
       await page.waitForTimeout(pollMs);
     }
@@ -70,8 +73,23 @@ async function importPlaywright() {
   }
 }
 
-async function captureSession(context, page, appUrl) {
+async function clickGoogleSignIn(page, stderr) {
+  const googleButton = page
+    .frameLocator('iframe[src*="accounts.google.com/gsi/button"]')
+    .locator('[role="button"], div[role="button"], button')
+    .first();
+
+  try {
+    await googleButton.click({ timeout: 10_000 });
+    stderr.write('Opened Google sign-in.\n');
+  } catch {
+    stderr.write('Google sign-in button was not clickable; leaving Segi login page open.\n');
+  }
+}
+
+async function captureSession(context, appUrl) {
   const storageState = await context.storageState();
+  const page = findSegiPage(context, appUrl);
   const pageStorage = await readPageStorage(page);
   const tokens = extractTokens(storageState, pageStorage);
   const appOrigin = new URL(appUrl).origin;
@@ -88,6 +106,12 @@ async function captureSession(context, page, appUrl) {
     cookieCount: storageState.cookies?.length || 0,
     apiCookieCount: countCookieHeader(buildCookieHeader(storageState, 'https://segiapi.extn.ai'))
   };
+}
+
+function findSegiPage(context, appUrl) {
+  const appOrigin = new URL(appUrl).origin;
+  const pages = context.pages();
+  return pages.find((page) => page.url().startsWith(appOrigin)) || pages[0];
 }
 
 function isAuthenticatedSession(session) {

@@ -1,6 +1,6 @@
 {
   "name": "@bareecorporation/segi-cli",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Segi CLI for browser SSO login and REST API access.",
   "type": "module",
   "bin": {

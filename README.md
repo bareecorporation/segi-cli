@@ -33,8 +33,8 @@ Run the browser SSO flow once:
 segi login
 ```
 
-The CLI opens `https://segi.extn.ai/projects`. Complete Google SSO in that
-browser window. After a Segi session is detected, the CLI saves cookies,
+The CLI opens `https://segi.extn.ai/login` and clicks the Google sign-in button.
+Complete Google SSO in that browser window. After a Segi session is detected, the CLI saves cookies,
 localStorage, sessionStorage, and any extracted Segi tokens to:
 
 ```bash
@@ -50,6 +50,12 @@ The login browser uses a persistent profile at:
 That profile is separate from your normal Chrome profile, but it is reused by
 later `segi login` runs so Google SSO does not start from a completely clean
 browser each time.
+
+If you need the Segi email/password form instead of Google SSO:
+
+```bash
+segi login --no-google
+```
 
 Later REST calls reuse that saved session:
 

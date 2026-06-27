@@ -42,12 +42,13 @@ Auth:
 
 Options:
   --base-url <url>        Segi API base URL. Default: https://segiapi.extn.ai
-  --app-url <url>         Segi web app URL for browser login. Default: https://segi.extn.ai/projects
+  --app-url <url>         Segi web app URL for browser login. Default: https://segi.extn.ai/login
   --token <token>         Bearer token or JSON containing accessToken.
   --tokens-json <path>    File containing localStorage segi.tokens JSON.
   --session-file <path>   Cached Segi browser session file. Default: ${defaultAuthPath()}
   --auth-file <path>      Alias for --session-file.
   --no-session-file       Ignore cached browser session.
+  --no-google             Do not auto-click Google sign-in during login.
   --browser-data-dir <p>  Persistent browser profile for login.
   --headless              Run browser login headless.
   --timeout <duration>    Browser login timeout. Default: 30m.
@@ -90,7 +91,8 @@ async function main(argv = process.argv.slice(2)) {
         headless: Boolean(options.headless),
         timeoutMs: parseDurationMs(options.timeout || '30m'),
         browserName: options.browser,
-        browserDataDir: options.browserDataDir
+        browserDataDir: options.browserDataDir,
+        google: !options.noGoogle
       });
       writeSession(payload, sessionFile);
       payload = redactSession(payload, options.showTokens, sessionFile);
@@ -187,7 +189,9 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (['--events', '--no-auth-file', '--no-session-file', '--show-tokens', '--headless'].includes(arg)) {
+    if (
+      ['--events', '--no-auth-file', '--no-session-file', '--no-google', '--show-tokens', '--headless'].includes(arg)
+    ) {
       options[toCamel(arg.slice(2))] = true;
       continue;
     }
